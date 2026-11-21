@@ -1,0 +1,207 @@
+import productsData from "./products.json";
+import imageMetadata from "../assets/webp/manifest.json";
+import catalogMockups from "./catalogMockups.json";
+
+type ProductVariant = {
+  imageKey?: string;
+  imagePrimary?: string;
+  imageWebp?: string;
+  imageSrcset?: string;
+  [key: string]: unknown;
+};
+
+export type ProductRecord = {
+  id?: string;
+  slug: string;
+  title?: string;
+  url: string;
+  imageKey?: string;
+  imageSecondaryKey?: string;
+  imagePrimary: string;
+  imageSecondary: string;
+  imageWebp: string;
+  imageSrcset: string;
+  category?: string;
+  tags?: string[];
+  soldOut?: boolean;
+  variants: ProductVariant[] | null;
+  [key: string]: unknown;
+};
+
+type RawProduct = {
+  id?: string;
+  slug?: string;
+  title?: string;
+  url?: string;
+  imageKey?: string;
+  imageSecondaryKey?: string;
+  imagePrimary?: string;
+  imageSecondary?: string;
+  imageWebp?: string;
+  variants?: ProductVariant[];
+  [key: string]: unknown;
+};
+
+const imageKeyToFile: Record<string, string> = {
+  safeZoneBlack: "BLACK SAFE zone 4 BOY.png",
+  whiteCameleon: "WHITE CAMELEON.png",
+  safeBabiGirlBlack: "BLACK SAFE BABI GIRL.png",
+  newGbonhiOnTop: "NEW GBONHI ON TOP CAMELEON.png",
+  newGbonhiOnTopBgab: "NEW GBONHI ON TOP BGAB.png",
+  safeZoneWhite: "WHITE SAFE zone 4 BOY.png",
+  safeBabiGirl: "WHITE SAFE BABI GIRL.png",
+  blackCameleon: "BLACK CAMELEON.png",
+  arwFilmLogoTee: "ARW FILM TEE FRONT CUTOUT.png",
+  arwFilmDopamineTee: "ARW FILM DOPAMINE TEE CUTOUT.png",
+  arwFilmCityBlackFront: "ARW FILM CITY TEE BLACK FRONT CUTOUT.png",
+  arwFilmCityBlackBack: "ARW FILM CITY TEE BLACK BACK CUTOUT.png",
+  arwFilmCityWhiteFront: "ARW FILM CITY TEE WHITE FRONT CUTOUT.png",
+  arwFilmCityWhiteBack: "ARW FILM CITY TEE WHITE BACK CUTOUT.png",
+  newGbonhiCamoWhite: "NEW GBONHI CAMO TEE WHITE SHOP.png",
+  newGbonhiCamoBlack: "NEW GBONHI CAMO TEE BLACK CUTOUT.png",
+};
+
+const imageKeyMap = Object.fromEntries(
+  Object.entries(imageKeyToFile).map(([key, fileName]) => [
+    key,
+    new URL(`../assets/${fileName}`, import.meta.url).href,
+  ])
+) as Record<string, string>;
+
+const webpModules = import.meta.glob("../assets/webp/*.webp", {
+  eager: true,
+  import: "default",
+}) as Record<string, string>;
+
+const webpMap = Object.fromEntries(
+  Object.entries(webpModules).map(([path, url]) => [path.split("/").pop(), url])
+) as Record<string, string>;
+
+const catalogModules = import.meta.glob("../assets/catalog/*.webp", { eager: true, import: "default" }) as Record<string, string>;
+const catalogImage = (id?: string, width?: number): string => id
+  ? catalogModules[`../assets/catalog/${id}${width ? `-${width}` : ""}.webp`] || ""
+  : "";
+type CatalogEntry = { primaryView?: string; primary: { id: string }; secondary?: { id: string } };
+const catalogForKey = (key?: string) => {
+  const entry = key ? (catalogMockups as Record<string, CatalogEntry>)[key] : undefined;
+  if (!entry) return {};
+  const primary = catalogImage(entry.primary.id);
+  const secondary = catalogImage(entry.secondary?.id);
+  return {
+    catalogMockup: true,
+    imagePrimary: primary,
+    imageWebp: primary,
+    imageSrcset: [400, 800, 960].map(width => `${catalogImage(entry.primary.id, width === 960 ? undefined : width)} ${width}w`).join(", "),
+    imageSecondary: secondary,
+    imagePrimaryView: entry.primaryView || "front",
+    imageSecondaryView: secondary ? (entry.primaryView === "back" ? "front" : "back") : "",
+  };
+};
+
+const slugify = (value: string | undefined) =>
+  String(value || "")
+    .toLowerCase()
+    .replace(/&/g, "and")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-+|-+$)/g, "");
+
+const resolveImageByKey = (imageKey?: string): string => {
+  if (!imageKey) {
+    return "";
+  }
+  return resolveWebpByKey(imageKey) || imageKeyMap[imageKey] || "";
+};
+
+const resolveWebpByKey = (imageKey?: string): string => {
+  if (!imageKey) {
+    return "";
+  }
+  const fileName = imageKeyToFile[imageKey];
+  if (!fileName) {
+    return "";
+  }
+  const webpName = fileName.replace(/\.(png|jpe?g)$/i, ".webp");
+  return webpMap[webpName] || "";
+};
+
+const resolveSrcsetByKey = (imageKey?: string): string => {
+  const fileName = imageKey ? imageKeyToFile[imageKey] : "";
+  if (!fileName) return "";
+  const sources = [400, 800].map((width) => {
+    const url = webpMap[fileName.replace(/\.(png|jpe?g)$/i, `-${width}.webp`)];
+    return url ? `${url} ${width}w` : "";
+  }).filter(Boolean);
+  const metadata = (imageMetadata as Record<string, { width: number }>)[fileName];
+  const original = resolveWebpByKey(imageKey);
+  if (original && metadata) sources.push(`${original} ${metadata.width}w`);
+  return sources.join(", ");
+};
+
+const resolveImagePrimary = (product: RawProduct): string => {
+  if (Array.isArray(product.variants) && product.variants.length) {
+    return resolveImageByKey(product.variants[0].imageKey);
+  }
+  if (product.imageKey && imageKeyMap[product.imageKey]) {
+    return resolveImageByKey(product.imageKey);
+  }
+  return product.imagePrimary || "";
+};
+
+const resolveImageWebp = (product: RawProduct): string => {
+  if (Array.isArray(product.variants) && product.variants.length) {
+    return resolveWebpByKey(product.variants[0].imageKey);
+  }
+  if (product.imageWebp) {
+    return product.imageWebp;
+  }
+  if (!product.imageKey) {
+    return "";
+  }
+  const fileName = imageKeyToFile[product.imageKey];
+  if (!fileName) {
+    return "";
+  }
+  const webpName = fileName.replace(/\.(png|jpe?g)$/i, ".webp");
+  return webpMap[webpName] || "";
+};
+
+const rawProducts: RawProduct[] = Array.isArray(productsData)
+  ? (productsData as RawProduct[])
+  : [];
+
+export const products: ProductRecord[] = rawProducts.map((product, index) => {
+  const slug = product.slug || slugify(product.title || `product-${index + 1}`);
+  const variants = Array.isArray(product.variants)
+    ? product.variants.map((variant: ProductVariant) => ({
+        ...variant,
+        imagePrimary: resolveImageByKey(variant.imageKey),
+        imageWebp: resolveWebpByKey(variant.imageKey),
+        imageSrcset: resolveSrcsetByKey(variant.imageKey),
+        imageOriginal: resolveImageByKey(variant.imageKey),
+        ...catalogForKey(variant.imageKey),
+      }))
+    : null;
+  const primaryFromVariants = variants?.[0]?.imagePrimary || "";
+  const secondaryFromVariants = variants?.[1]?.imagePrimary || "";
+  return {
+    ...product,
+    slug,
+    url: product.url || `/product/${slug}`,
+    variants,
+    imagePrimary: primaryFromVariants || resolveImagePrimary(product),
+    imageSecondary:
+      secondaryFromVariants ||
+      resolveImageByKey(product.imageSecondaryKey) ||
+      product.imageSecondary ||
+      "",
+    imageWebp: resolveImageWebp(product),
+    imageSrcset: resolveSrcsetByKey(product.variants?.[0]?.imageKey || product.imageKey),
+    imageOriginal: resolveImageByKey(product.variants?.[0]?.imageKey || product.imageKey),
+    ...catalogForKey(product.variants?.[0]?.imageKey || product.imageKey),
+  };
+});
+
+export const findProductBySlug = (
+  slug: string | undefined
+): ProductRecord | undefined =>
+  products.find((product) => product.slug === slug);

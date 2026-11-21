@@ -1,0 +1,154 @@
+import { createRouter, createWebHashHistory, createWebHistory } from "vue-router";
+import { applySeo } from "./utils/seo.js";
+import { clearAppError } from "./utils/appError.js";
+import { FACES_META } from "./data/facesDrop.js";
+import { shouldUseHashRouter } from "./utils/routerMode.js";
+
+const ShopPage = () => import("./ShopPage.vue");
+const LookbookPage = () => import("./LookbookPage.vue");
+const LabPage = () => import("./LabPage.vue");
+const ArwStudioPage = () => import("./ArwStudioPage.vue");
+const AboutPage = () => import("./AboutPage.vue");
+const ProductPage = () => import("./ProductPage.vue");
+const CheckoutPage = () => import("./CheckoutPage.vue");
+const OrdersPage = () => import("./OrdersPage.vue");
+const StudioPage = () => import("./StudioPage.vue");
+const CollectionsPage = () => import("./CollectionsPage.vue");
+
+const routes = [
+  { path: "/faces", name: "faces", component: () => import("./FacesPage.vue"), meta: FACES_META },
+  { path: "/confidentialite", name: "privacy", component: () => import("./LegalPage.vue"), meta: { title: "Confidentialité et données personnelles | NewGbonhi", description: "Données personnelles, cookies et droits des visiteurs NewGbonhi." } },
+  { path: "/cgu", name: "terms", component: () => import("./LegalPage.vue"), meta: { title: "Conditions générales d’utilisation | NewGbonhi", description: "Conditions d’utilisation des services NewGbonhi et contact." } },
+  { path: "/:pathMatch(.*)*", name: "not-found", component: () => import("./NotFoundPage.vue"), meta: { title: "Page introuvable | NewGbonhi", robots: "noindex, follow" } },
+  {
+    path: "/",
+    name: "shop",
+    component: ShopPage,
+    meta: {
+      title: "New Gbonhi Shop | Streetwear en Cote d'Ivoire",
+      description:
+        "New Gbonhi Shop : découvre les pièces du drop, les nouveautés streetwear et les informations de commande.",
+    },
+  },
+  {
+    path: "/product/:slug",
+    name: "product",
+    component: ProductPage,
+    meta: {
+      title: "Produit | New Gbonhi Shop",
+      description: "Details produit New Gbonhi Shop: visuels, tailles et prix.",
+    },
+  },
+  {
+    path: "/collections",
+    name: "collections",
+    component: CollectionsPage,
+    meta: {
+      title: "Collections | New Gbonhi Shop",
+      description: "Tous les drops, collaborations et archives NewGbonhi réunis dans le catalogue.",
+    },
+  },
+  {
+    path: "/studio",
+    name: "studio",
+    component: StudioPage,
+    meta: {
+      title: "Studio | New Gbonhi Shop",
+      description:
+        "Personnalise ton t-shirt unicolor New Gbonhi avec les logos et stickers disponibles.",
+      robots: "noindex, nofollow",
+    },
+  },
+  {
+    path: "/checkout",
+    name: "checkout",
+    component: CheckoutPage,
+    meta: {
+      title: "Checkout | New Gbonhi Shop",
+      description: "Finalise ta commande New Gbonhi Shop.",
+      robots: "noindex, nofollow",
+    },
+  },
+  {
+    path: "/orders",
+    name: "orders",
+    component: OrdersPage,
+    meta: {
+      title: "Orders | New Gbonhi Shop",
+      description: "Espace administration des commandes.",
+      robots: "noindex, nofollow",
+    },
+  },
+  {
+    path: "/lookbook",
+    name: "lookbook",
+    component: LookbookPage,
+    meta: {
+      title: "Lookbook | New Gbonhi Shop",
+      description: "Lookbook officiel New Gbonhi Shop et direction visuelle des drops.",
+    },
+  },
+  {
+    path: "/lab",
+    name: "lab",
+    component: LabPage,
+    meta: {
+      title: "NewGbonhi Lab | Collective digital a Abidjan",
+      description:
+        "NewGbonhi Lab reference les talents, studios, marques et projets du collectif NewGbonhi.",
+    },
+  },
+  {
+    path: "/lab/arw-studio",
+    name: "arw-studio",
+    component: ArwStudioPage,
+    meta: {
+      title: "ARW Studio | NewGbonhi Lab",
+      description:
+        "ARW Studio dans le NewGbonhi Lab: capsule Drop 03, chrome identity et produits ARW Film.",
+    },
+  },
+  {
+    path: "/about",
+    name: "about",
+    component: AboutPage,
+    meta: {
+      title: "About | New Gbonhi Shop",
+      description: "A propos de New Gbonhi Shop: vision, univers et infos de la marque.",
+    },
+  },
+];
+
+const useHashRouter = shouldUseHashRouter(
+  import.meta.env.VITE_USE_HASH_ROUTER,
+  typeof window === "undefined" ? "" : window.location.hostname
+);
+const history = useHashRouter
+  ? createWebHashHistory(import.meta.env.BASE_URL)
+  : createWebHistory(import.meta.env.BASE_URL);
+
+const router = createRouter({
+  history,
+  routes,
+  scrollBehavior(to, from, savedPosition) {
+    if (savedPosition) return savedPosition;
+    if (to.hash) return { el: to.hash };
+    return { top: 0 };
+  },
+});
+
+router.afterEach((to) => {
+  clearAppError();
+  applySeo({
+    title: to.meta?.title,
+    description: to.meta?.description,
+    robots: to.meta?.robots,
+    path: to.path,
+    image: to.meta?.image,
+    imageAlt: to.meta?.imageAlt,
+    imageWidth: to.meta?.imageWidth,
+    imageHeight: to.meta?.imageHeight,
+  });
+});
+
+export default router;

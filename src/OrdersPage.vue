@@ -1,0 +1,1435 @@
+﻿<template>
+  <div class="orders-page">
+    <SiteHeader @toggle-cart="toggleCart" />
+
+    <CartPanel :open="cartOpen" @close="cartOpen = false" />
+
+    <main class="orders-main">
+      <div class="orders-head">
+        <div class="orders-index"><span>ADMIN / ORDERS</span><span>NEWGBONHI / 2026</span></div>
+        <p>{{ $t("navOrders") }}</p>
+        <div class="orders-title">
+          <h1>{{ $t("orderHistory") }}</h1>
+          <div v-if="isAuthorized" class="orders-header-actions">
+            <button class="ghost-button orders-tool-button" type="button" :disabled="isLoading || isSaving" :title="$t('refreshOrders')" @click="refreshOrders">
+              <RefreshCw :size="16" aria-hidden="true" />
+              {{ isLoading ? $t("loading") : $t("refreshOrders") }}
+            </button>
+            <button class="ghost-button" type="button" :disabled="isLoading || isSaving" @click="logout">
+              {{ $t("logout") }}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <FacesWinner v-if="isAuthorized" :key="adminToken" :token="adminToken" />
+      <section v-if="isAuthorized" class="orders-stats" aria-label="Order overview">
+        <article><span>ALL</span><strong>{{ orders.length }}</strong></article>
+        <article><span>TO VALIDATE</span><strong>{{ pendingOrders }}</strong></article>
+        <article><span>PRODUCTION</span><strong>{{ productionOrders }}</strong></article>
+        <article><span>DELIVERED</span><strong>{{ deliveredOrders }}</strong></article>
+      </section>
+
+      <p v-if="isAuthorized && authError" class="orders-feedback orders-error" role="alert">
+        {{ authError }}
+      </p>
+      <p v-if="isAuthorized && actionSuccess" class="orders-feedback orders-success" role="status" aria-live="polite">
+        {{ actionSuccess }}
+      </p>
+
+      <div v-if="!isAuthorized" class="orders-login">
+        <p>{{ $t("adminRequired") }}</p>
+        <p class="orders-hint">{{ $t("adminHint") }}</p>
+        <form @submit.prevent="unlock">
+          <input
+            v-model.trim="adminPasswordInput"
+            type="password"
+            :placeholder="$t('adminPassword')"
+            :disabled="isLoading"
+          />
+          <button class="pay-button" type="submit" :disabled="!canUnlock">
+            {{ isLoading ? $t("loading") : $t("unlock") }}
+          </button>
+        </form>
+        <p v-if="authError" class="orders-error">{{ authError }}</p>
+      </div>
+
+      <div v-else-if="isLoading" class="orders-empty">
+        {{ $t("loadingOrders") }}
+      </div>
+
+      <div v-else-if="orders.length === 0" class="orders-empty">
+        {{ $t("noOrders") }}
+      </div>
+
+      <template v-else>
+        <section class="orders-toolbar" :aria-label="$t('orderControls')">
+          <label class="orders-search">
+            <span>{{ $t("searchOrders") }}</span>
+            <input
+              v-model.trim="orderSearch"
+              type="search"
+              :placeholder="$t('searchOrdersPlaceholder')"
+              autocomplete="off"
+            />
+          </label>
+          <div
+            class="orders-filter-tabs"
+            role="group"
+            :aria-label="$t('filterOrders')"
+          >
+            <button
+              v-for="filter in statusFilters"
+              :key="filter.id"
+              type="button"
+              :class="{ 'is-active': activeStatusFilter === filter.id }"
+              :aria-pressed="activeStatusFilter === filter.id"
+              @click="activeStatusFilter = filter.id"
+            >
+              <span>{{ filter.label }}</span>
+              <strong>{{ filter.count }}</strong>
+            </button>
+          </div>
+        </section>
+
+        <div class="orders-results">
+          <p role="status">{{ $t("ordersResultCount", { count: filteredOrders.length, total: orders.length }) }}</p>
+          <button class="ghost-button orders-tool-button" type="button" :disabled="!filteredOrders.length || isSaving" :title="$t('exportFilteredOrders')" @click="exportOrders">
+            <Download :size="16" aria-hidden="true" />
+            {{ $t("exportOrdersCsv") }}
+          </button>
+        </div>
+
+        <div v-if="filteredOrders.length === 0" class="orders-empty">
+          {{ $t("noFilteredOrders") }}
+        </div>
+
+        <section v-else class="orders-grid">
+          <article v-for="order in filteredOrders" :key="order.id" class="order-card">
+          <header>
+            <div>
+              <h2>{{ order.id }}</h2>
+              <p>{{ formatDate(order.createdAt) }}</p>
+            </div>
+            <span class="order-status" :class="order.status">
+              {{ formatStatus(order.status) }}
+            </span>
+          </header>
+
+          <div class="order-body">
+            <p class="order-name">
+              {{ order.customer.firstName }} {{ order.customer.lastName }}
+            </p>
+            <p class="order-contact">
+              {{ order.customer.phone }} - {{ order.customer.email }}
+            </p>
+            <p class="order-address">
+              {{ order.customer.address }}, {{ order.customer.city }}
+            </p>
+          </div>
+
+          <div v-if="order.fulfillment" class="order-fulfillment">
+            <span>{{ $t("preorderBadge") }}</span>
+            <strong>
+              {{ order.fulfillment.productionWindow || $t("productionAfterPayment") }}
+            </strong>
+            <p>
+              {{ $t("deliveryWindow") }}:
+              {{ order.fulfillment.deliveryWindow || $t("deliveryWindow48h72h") }}
+            </p>
+          </div>
+
+          <div v-if="order.payment" class="order-payment">
+            <span>{{ $t("paymentProvider") }}</span>
+            <strong>{{ formatPaymentProvider(order.payment.provider) }}</strong>
+            <p>
+              {{ $t("paymentStatus") }}:
+              {{ formatPaymentStatus(order.payment.status) }}
+            </p>
+            <p v-if="order.payment.reference">
+              {{ $t("paymentReferenceShort") }}: {{ order.payment.reference }}
+            </p>
+            <p v-if="order.payment.paymentMethod">
+              {{ $t("paymentMethod") }}: {{ order.payment.paymentMethod }}
+            </p>
+          </div>
+
+          <div class="order-items">
+            <div v-for="item in order.items" :key="item.key" class="order-item">
+              <span>
+                {{ item.title }}
+                <em v-if="item.selectedSize">({{ item.selectedSize }})</em>
+                <em v-if="item.selectedColor"> - {{ item.selectedColor }}</em>
+                <em v-if="item.selectedDesignName"> - {{ item.selectedDesignName }}</em>
+                <em v-if="item.preorder"> - {{ $t("preorderBadge") }}</em>
+              </span>
+              <span>x{{ item.qty }}</span>
+              <strong>{{ formatPrice(item.qty * item.price) }}</strong>
+            </div>
+          </div>
+
+          <div class="order-summary">
+            <div>
+              <span>{{ $t("subtotal") }}</span>
+              <strong>{{ formatPrice(order.subtotal) }}</strong>
+            </div>
+            <div>
+              <span>{{ $t("delivery") }}</span>
+              <strong>{{ formatPrice(order.shipping?.fee || 0) }}</strong>
+            </div>
+            <div class="order-total">
+              <span>{{ $t("total") }}</span>
+              <strong>{{ formatPrice(order.total) }}</strong>
+            </div>
+          </div>
+
+          <footer class="order-actions">
+            <button type="button" class="ghost-button" @click="copyOrder(order)">
+              {{ $t("copySummary") }}
+            </button>
+            <button
+              v-if="buildCustomerWhatsappUrl(order)"
+              type="button"
+              class="ghost-button"
+              @click="openCustomerWhatsApp(order)"
+            >
+              {{ $t("openCustomerWhatsApp") }}
+            </button>
+            <button type="button" class="ghost-button" @click="copyCustomerContact(order)">
+              {{ $t("copyCustomerContact") }}
+            </button>
+            <button
+              v-if="canSyncPayment(order)"
+              type="button"
+              class="ghost-button"
+              :disabled="isSaving"
+              @click="syncPayment(order)"
+            >
+              {{ $t("syncPayment") }}
+            </button>
+            <button
+              v-if="order.status !== 'production' && order.status !== 'delivered'"
+              type="button"
+              class="pay-button"
+              :disabled="isSaving"
+              @click="advanceOrder(order)"
+            >
+              {{ primaryActionLabel(order) }}
+            </button>
+            <button
+              v-if="order.status === 'production'"
+              type="button"
+              class="pay-button"
+              :disabled="isSaving"
+              @click="markDelivered(order)"
+            >
+              {{ $t("markDelivered") }}
+            </button>
+            <button
+              type="button"
+              class="delete-button"
+              :class="{ 'is-confirming': pendingDeleteId === order.id }"
+              :disabled="isSaving"
+              @click="removeOrder(order)"
+            >
+              {{ pendingDeleteId === order.id ? $t("confirmDelete") : $t("delete") }}
+            </button>
+            <button
+              v-if="pendingDeleteId === order.id"
+              type="button"
+              class="ghost-button"
+              :disabled="isSaving"
+              @click="pendingDeleteId = ''"
+            >
+              {{ $t("cancel") }}
+            </button>
+          </footer>
+          </article>
+        </section>
+      </template>
+    </main>
+
+    <SiteFooter />
+  </div>
+</template>
+
+<script>
+import SiteHeader from "./components/SiteHeader.vue";
+import CartPanel from "./components/CartPanel.vue";
+import FacesWinner from "./components/FacesWinner.vue";
+import { Download, RefreshCw } from "@lucide/vue";
+import { buildOrdersCsv } from "./utils/orderExport.js";
+import { cartStore } from "./data/cart.ts";
+import {
+  adminLogin,
+  deleteOrder,
+  loadOrders,
+  syncGeniusPayPayment,
+  syncMobileMoneyPayment,
+  updateOrderStatus,
+} from "./data/orders.js";
+
+const logoUrl = new URL("./assets/webp/newgbonhi-logo.webp", import.meta.url).href;
+const AUTH_KEY = "newgbonhi.orders.token";
+
+export default {
+  name: "OrdersPage",
+  components: {
+    SiteHeader,
+    CartPanel,
+    FacesWinner,
+    Download,
+    RefreshCw,
+  },
+  data() {
+    return {
+      logoUrl,
+      cartOpen: false,
+      orders: [],
+      adminPasswordInput: "",
+      authError: "",
+      isAuthorized: false,
+      adminToken: "",
+      isLoading: false,
+      isSaving: false,
+      pendingDeleteId: "",
+      actionSuccess: "",
+      orderSearch: "",
+      activeStatusFilter: "all",
+    };
+  },
+  async created() {
+    const savedToken = window.sessionStorage.getItem(AUTH_KEY) || "";
+    if (!savedToken) {
+      return;
+    }
+    this.adminToken = savedToken;
+    this.isAuthorized = true;
+    this.isLoading = true;
+    try {
+      this.orders = await loadOrders(this.adminToken);
+    } catch (error) {
+      this.authError =
+        error instanceof Error ? error.message : "Unable to load orders.";
+      this.logout(false);
+    } finally {
+      this.isLoading = false;
+    }
+  },
+  computed: {
+    cartCount() {
+      return cartStore.cartCount.value;
+    },
+    canUnlock() {
+      return Boolean(this.adminPasswordInput) && !this.isLoading;
+    },
+    pendingOrders() {
+      return this.orders.filter((order) => ["sent", "paid_reported", "paid"].includes(order.status)).length;
+    },
+    productionOrders() {
+      return this.orders.filter((order) => order.status === "production").length;
+    },
+    deliveredOrders() {
+      return this.orders.filter((order) => order.status === "delivered").length;
+    },
+    statusFilters() {
+      return [
+        {
+          id: "all",
+          label: this.$t("ordersFilterAll"),
+          count: this.orders.length,
+        },
+        {
+          id: "to_validate",
+          label: this.$t("ordersFilterToValidate"),
+          count: this.orders.filter((order) =>
+            ["sent", "paid_reported"].includes(order.status)
+          ).length,
+        },
+        {
+          id: "paid",
+          label: this.$t("paidStatus"),
+          count: this.orders.filter((order) => order.status === "paid").length,
+        },
+        {
+          id: "production",
+          label: this.$t("production"),
+          count: this.productionOrders,
+        },
+        {
+          id: "delivered",
+          label: this.$t("delivered"),
+          count: this.deliveredOrders,
+        },
+      ];
+    },
+    filteredOrders() {
+      const statusFilter = this.activeStatusFilter;
+      const query = this.normalizeSearchText(this.orderSearch);
+      return this.orders.filter((order) => {
+        if (
+          statusFilter === "to_validate" &&
+          !["sent", "paid_reported"].includes(order.status)
+        ) {
+          return false;
+        }
+        if (
+          !["all", "to_validate"].includes(statusFilter) &&
+          order.status !== statusFilter
+        ) {
+          return false;
+        }
+        if (!query) {
+          return true;
+        }
+        return this.normalizeSearchText(this.buildOrderSearchText(order)).includes(
+          query
+        );
+      });
+    },
+  },
+  methods: {
+    async refreshOrders() {
+      if (!this.isAuthorized || !this.adminToken || this.isLoading || this.isSaving) return;
+      const token = this.adminToken;
+      this.authError = "";
+      this.actionSuccess = "";
+      this.pendingDeleteId = "";
+      this.isLoading = true;
+      try {
+        const orders = await loadOrders(token);
+        if (this.adminToken !== token) return;
+        this.orders = orders;
+        this.actionSuccess = this.$t("ordersRefreshed");
+      } catch (error) {
+        if (this.adminToken !== token) return;
+        this.authError = error instanceof Error ? error.message : this.$t("ordersRefreshFailed");
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    exportOrders() {
+      if (!this.isAuthorized || this.isLoading || this.isSaving || !this.filteredOrders.length) return;
+      this.authError = "";
+      this.actionSuccess = "";
+      let url;
+      const link = document.createElement("a");
+      try {
+        const csv = buildOrdersCsv(this.filteredOrders, {
+          translate: (key) => this.$t(key),
+          formatStatus: this.formatStatus,
+          formatPaymentStatus: this.formatPaymentStatus,
+          formatPaymentProvider: this.formatPaymentProvider,
+        });
+        url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+        link.href = url;
+        link.download = `newgbonhi-orders-${new Date().toISOString().slice(0, 10)}.csv`;
+        document.body.appendChild(link);
+        link.click();
+        this.actionSuccess = this.$t("ordersExportStarted", { count: this.filteredOrders.length });
+      } catch {
+        this.authError = this.$t("ordersExportFailed");
+      } finally {
+        link.remove();
+        if (url) setTimeout(() => URL.revokeObjectURL(url), 1000);
+      }
+    },
+    toggleCart() {
+      this.cartOpen = !this.cartOpen;
+    },
+    formatPrice(value) {
+      if (typeof value !== "number" || Number.isNaN(value)) {
+        return "";
+      }
+      const formatted = new Intl.NumberFormat("fr-CI", {
+        style: "decimal",
+        maximumFractionDigits: 0,
+      }).format(value);
+      return `${formatted} FCFA`;
+    },
+    formatDate(value) {
+      if (!value) {
+        return "";
+      }
+      const date = new Date(value);
+      return new Intl.DateTimeFormat("fr-CI", {
+        dateStyle: "medium",
+        timeStyle: "short",
+      }).format(date);
+    },
+    formatStatus(status) {
+      const map = {
+        sent: this.$t("sent"),
+        paid_reported: this.$t("paidReported"),
+        paid: this.$t("paidStatus"),
+        production: this.$t("production"),
+        delivered: this.$t("delivered"),
+      };
+      return map[status] || status || this.$t("sent");
+    },
+    formatPaymentProvider(provider) {
+      const normalizedProvider = String(provider || "").toLowerCase();
+      const map = {
+        geniuspay: "GeniusPay",
+        wave: "Wave",
+        orange_money: "Orange Money",
+        mtn_money: "MTN Money",
+      };
+      return map[normalizedProvider] || provider || this.$t("paymentUnknown");
+    },
+    formatPaymentStatus(status) {
+      const normalizedStatus = String(status || "").toLowerCase();
+      const map = {
+        open: this.$t("paymentPending"),
+        pending: this.$t("paymentPending"),
+        initiated: this.$t("paymentPending"),
+        processing: this.$t("paymentProcessing"),
+        completed: this.$t("paymentCompleted"),
+        paid: this.$t("paymentCompleted"),
+        success: this.$t("paymentCompleted"),
+        succeeded: this.$t("paymentCompleted"),
+        successful: this.$t("paymentCompleted"),
+        failed: this.$t("paymentFailed"),
+        cancelled: this.$t("paymentCancelled"),
+        expired: this.$t("paymentExpired"),
+        refunded: this.$t("paymentRefunded"),
+      };
+      return map[normalizedStatus] || status || this.$t("paymentUnknown");
+    },
+    normalizeSearchText(value) {
+      return String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase()
+        .trim();
+    },
+    buildOrderSearchText(order) {
+      const itemText = Array.isArray(order.items)
+        ? order.items
+            .map((item) =>
+              [
+                item.title,
+                item.selectedSize,
+                item.selectedColor,
+                item.selectedDesignName,
+              ]
+                .filter(Boolean)
+                .join(" ")
+            )
+            .join(" ")
+        : "";
+      return [
+        order.id,
+        order.status,
+        order.customer?.firstName,
+        order.customer?.lastName,
+        order.customer?.phone,
+        order.customer?.email,
+        order.customer?.address,
+        order.customer?.city,
+        order.shipping?.label,
+        order.payment?.provider,
+        order.payment?.status,
+        order.payment?.reference,
+        itemText,
+      ]
+        .filter(Boolean)
+        .join(" ");
+    },
+    normalizeWhatsappPhone(value) {
+      const digits = String(value || "").replace(/\D/g, "").replace(/^00/, "");
+      if (!digits) {
+        return "";
+      }
+      if (digits.startsWith("225")) {
+        return digits;
+      }
+      if (digits.length === 10 && digits.startsWith("0")) {
+        return `225${digits}`;
+      }
+      return digits;
+    },
+    buildCustomerWhatsappUrl(order) {
+      const phone = this.normalizeWhatsappPhone(order?.customer?.phone);
+      if (!phone) {
+        return "";
+      }
+      const message = encodeURIComponent(
+        [
+          `Bonjour ${order.customer?.firstName || ""}`.trim(),
+          `Commande ${order.id} NewGbonhi.`,
+          `Statut: ${this.formatStatus(order.status)}.`,
+          `Montant article: ${this.formatPrice(order.subtotal)}.`,
+          `Livraison: ${order.shipping?.label || "-"} (${this.formatPrice(
+            order.shipping?.fee || 0
+          )}).`,
+        ].join("\n")
+      );
+      return `https://wa.me/${phone}?text=${message}`;
+    },
+    canSyncPayment(order) {
+      const status = String(order?.status || "").toLowerCase();
+      const provider = String(order?.payment?.provider || "").toLowerCase();
+      return (
+        ["geniuspay", "wave"].includes(provider) &&
+        Boolean(order.payment.reference) &&
+        (provider !== "wave" || order.payment.mode === "api") &&
+        !["paid", "production", "delivered"].includes(status)
+      );
+    },
+    primaryActionLabel(order) {
+      return order?.status === "paid"
+        ? this.$t("launchProduction")
+        : this.$t("markPaid");
+    },
+    buildOrderSummary(order) {
+      const lines = [
+        "NewGbonhi Preorder",
+        `Order ID: ${order.id}`,
+        `Status: ${this.formatStatus(order.status)}`,
+        `Name: ${order.customer.firstName} ${order.customer.lastName}`,
+        `Phone: ${order.customer.phone}`,
+        `Email: ${order.customer.email}`,
+        `Address: ${order.customer.address}, ${order.customer.city}`,
+        `Delivery: ${order.shipping?.label || "-"} (${this.formatPrice(
+          order.shipping?.fee || 0
+        )})`,
+      ];
+
+      if (order.fulfillment) {
+        lines.push(
+          `Production: ${
+            order.fulfillment.productionWindow || this.$t("productionAfterPayment")
+          }`
+        );
+        lines.push(
+          `Delivery window: ${
+            order.fulfillment.deliveryWindow || this.$t("deliveryWindow48h72h")
+          }`
+        );
+      }
+
+      if (order.payment) {
+        lines.push(`Payment provider: ${this.formatPaymentProvider(order.payment.provider)}`);
+        lines.push(`Payment status: ${this.formatPaymentStatus(order.payment.status)}`);
+        if (order.payment.reference) {
+          lines.push(`Payment reference: ${order.payment.reference}`);
+        }
+        if (order.payment.paymentMethod) {
+          lines.push(`Payment method: ${order.payment.paymentMethod}`);
+        }
+      }
+
+      lines.push("Items:");
+
+      order.items.forEach((item) => {
+        const details = [
+          item.selectedSize || "",
+          item.selectedColor ? `Color: ${item.selectedColor}` : "",
+          item.selectedDesignName ? `Design: ${item.selectedDesignName}` : "",
+        ].filter(Boolean);
+        const detailText = details.length ? ` (${details.join(" | ")})` : "";
+        lines.push(
+          `- ${item.title}${detailText} x${item.qty} = ${this.formatPrice(
+            item.qty * item.price
+          )}`
+        );
+      });
+
+      lines.push(`Total: ${this.formatPrice(order.total)}`);
+      lines.push("Thank you.");
+      return lines.join("\n");
+    },
+    async copyOrder(order) {
+      try {
+        await navigator.clipboard.writeText(this.buildOrderSummary(order));
+        this.actionSuccess = this.$t("summaryCopied");
+      } catch (error) {
+        // noop
+      }
+    },
+    async copyCustomerContact(order) {
+      try {
+        await navigator.clipboard.writeText(
+          [
+            `${order.customer?.firstName || ""} ${order.customer?.lastName || ""}`.trim(),
+            order.customer?.phone,
+            order.customer?.email,
+            `${order.customer?.address || ""}, ${order.customer?.city || ""}`.trim(),
+          ]
+            .filter(Boolean)
+            .join("\n")
+        );
+        this.actionSuccess = this.$t("customerContactCopied");
+      } catch (error) {
+        this.authError = this.$t("copyFailed");
+      }
+    },
+    openCustomerWhatsApp(order) {
+      const url = this.buildCustomerWhatsappUrl(order);
+      if (!url) {
+        return;
+      }
+      window.open(url, "_blank", "noopener");
+    },
+    async advanceOrder(order) {
+      if (this.isSaving || !this.adminToken) {
+        return;
+      }
+      this.authError = "";
+      this.isSaving = true;
+      try {
+        const nextStatus = order.status === "paid" ? "production" : "paid";
+        this.orders = await updateOrderStatus(order.id, nextStatus, this.adminToken);
+      } catch (error) {
+        this.authError =
+          error instanceof Error ? error.message : "Unable to update order.";
+      } finally {
+        this.isSaving = false;
+      }
+    },
+    async syncPayment(order) {
+      if (this.isSaving || !this.adminToken || !this.canSyncPayment(order)) {
+        return;
+      }
+      this.authError = "";
+      this.actionSuccess = "";
+      this.isSaving = true;
+      try {
+        const provider = String(order?.payment?.provider || "").toLowerCase();
+        this.orders =
+          provider === "geniuspay"
+            ? await syncGeniusPayPayment(order.id, this.adminToken)
+            : await syncMobileMoneyPayment(order.id, this.adminToken);
+        this.actionSuccess = this.$t("paymentSynced");
+      } catch (error) {
+        this.authError =
+          error instanceof Error ? error.message : "Unable to sync payment.";
+      } finally {
+        this.isSaving = false;
+      }
+    },
+    async markDelivered(order) {
+      if (this.isSaving || !this.adminToken) {
+        return;
+      }
+      this.authError = "";
+      this.isSaving = true;
+      try {
+        this.orders = await updateOrderStatus(order.id, "delivered", this.adminToken);
+      } catch (error) {
+        this.authError =
+          error instanceof Error ? error.message : "Unable to update order.";
+      } finally {
+        this.isSaving = false;
+      }
+    },
+    async removeOrder(order) {
+      if (this.isSaving || !this.adminToken) {
+        return;
+      }
+      if (this.pendingDeleteId !== order.id) {
+        this.pendingDeleteId = order.id;
+        this.actionSuccess = "";
+        return;
+      }
+      this.authError = "";
+      this.actionSuccess = "";
+      this.isSaving = true;
+      try {
+        this.orders = await deleteOrder(order.id, this.adminToken);
+        this.pendingDeleteId = "";
+        this.actionSuccess = this.$t("orderDeleted");
+      } catch (error) {
+        this.authError =
+          error instanceof Error ? error.message : "Unable to delete order.";
+      } finally {
+        this.isSaving = false;
+      }
+    },
+    async unlock() {
+      this.authError = "";
+      if (!this.adminPasswordInput) {
+        this.authError = "Password is required.";
+        return;
+      }
+      this.isLoading = true;
+      try {
+        const session = await adminLogin(this.adminPasswordInput);
+        if (!session.token) {
+          throw new Error("Unable to open admin session.");
+        }
+        this.adminToken = session.token;
+        this.isAuthorized = true;
+        window.sessionStorage.setItem(AUTH_KEY, session.token);
+        this.adminPasswordInput = "";
+        this.orders = await loadOrders(this.adminToken);
+      } catch (error) {
+        this.authError =
+          error instanceof Error ? error.message : "Unable to authenticate.";
+      } finally {
+        this.isLoading = false;
+      }
+    },
+    logout(clearError = true) {
+      this.isAuthorized = false;
+      this.adminToken = "";
+      window.sessionStorage.removeItem(AUTH_KEY);
+      this.adminPasswordInput = "";
+      this.orders = [];
+      if (clearError) {
+        this.authError = "";
+      }
+    },
+  },
+};
+</script>
+
+<style scoped>
+:global(*) {
+  box-sizing: border-box;
+}
+
+:global(body) {
+  margin: 0;
+  font-family: "Space Grotesk", Arial, sans-serif;
+  background: #f5f5f5;
+  color: #0b0b0b;
+}
+
+.orders-page {
+  --text: #0b0b0b;
+  --muted: #606060;
+  --accent: #e10600;
+  --line: #0b0b0b;
+
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 32px 24px 48px;
+  position: relative;
+  z-index: 0;
+}
+
+.orders-page::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      rgba(0, 0, 0, 0.04),
+      rgba(0, 0, 0, 0.04) 1px,
+      transparent 1px,
+      transparent 48px
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(0, 0, 0, 0.04),
+      rgba(0, 0, 0, 0.04) 1px,
+      transparent 1px,
+      transparent 48px
+    );
+  pointer-events: none;
+  z-index: -1;
+}
+
+.shop-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  flex-wrap: wrap;
+  animation: rise 0.6s ease both;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.brand-logo {
+  width: 60px;
+  height: 60px;
+  object-fit: contain;
+}
+
+.brand-name {
+  margin: 0;
+  font-family: "Archivo Black", "Space Grotesk", Arial, sans-serif;
+  font-size: 20px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.brand-tagline {
+  margin: 2px 0 0;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+}
+
+.shop-nav {
+  display: flex;
+  gap: 18px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 12px;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.shop-nav::-webkit-scrollbar {
+  display: none;
+}
+
+.shop-nav a {
+  color: inherit;
+  text-decoration: none;
+  padding-bottom: 4px;
+  border-bottom: 2px solid transparent;
+}
+
+.shop-nav a.is-active {
+  border-color: var(--accent);
+}
+
+.shop-cta {
+  border: 1px solid var(--line);
+  background: #fff;
+  padding: 10px 16px;
+  text-transform: uppercase;
+  letter-spacing: 0.16em;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.shop-cta:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.12);
+}
+
+.orders-main {
+  margin-top: 32px;
+}
+
+.orders-head p {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.3em;
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.orders-head h1 {
+  margin: 8px 0 0;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.orders-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+}
+
+.orders-login {
+  margin-top: 18px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
+  padding: 18px;
+  background: #fff;
+  display: grid;
+  gap: 12px;
+}
+
+.orders-login p {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 11px;
+}
+
+.orders-login form {
+  display: grid;
+  gap: 10px;
+}
+
+.orders-login input {
+  border: 1px solid rgba(0, 0, 0, 0.3);
+  padding: 10px 12px;
+  font-size: 14px;
+  font-family: inherit;
+}
+
+.orders-hint {
+  color: var(--muted);
+  letter-spacing: 0.12em;
+  font-size: 10px;
+}
+
+.orders-error {
+  margin: 0;
+  color: #a00000;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+}
+
+.orders-feedback {
+  margin-top: 18px;
+  padding: 14px 16px;
+  border: 1px solid currentColor;
+}
+
+.orders-success {
+  color: #18733c;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+}
+
+.orders-empty {
+  margin-top: 18px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 16px;
+  padding: 24px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 12px;
+  color: var(--muted);
+  background: #fff;
+}
+
+.orders-toolbar {
+  margin-top: 20px;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.9fr) minmax(0, 1.5fr);
+  gap: 14px;
+  align-items: end;
+}
+
+.orders-header-actions,
+.orders-results { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; }
+.orders-results { margin-top: 16px; justify-content: space-between; }
+.orders-results p { margin: 0; font-size: 12px; color: var(--muted); }
+.orders-tool-button { display: inline-flex; align-items: center; justify-content: center; gap: 8px; letter-spacing: 0; }
+.orders-tool-button svg { flex-shrink: 0; }
+.orders-tool-button:disabled { opacity: .5; cursor: not-allowed; }
+.orders-tool-button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+
+.orders-search {
+  display: grid;
+  gap: 8px;
+}
+
+.orders-search span {
+  font: 700 9px/1 monospace;
+  color: var(--accent);
+  letter-spacing: .16em;
+  text-transform: uppercase;
+}
+
+.orders-search input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 12px 14px;
+  font: 700 12px/1.2 "Space Grotesk", Arial, sans-serif;
+  letter-spacing: 0;
+}
+
+.orders-search input:focus {
+  outline: 0;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(225, 6, 0, .12);
+}
+
+.orders-filter-tabs {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+}
+
+.orders-filter-tabs button {
+  min-height: 46px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  background: #fff;
+  color: var(--text);
+  padding: 9px 10px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  cursor: pointer;
+  text-align: left;
+}
+
+.orders-filter-tabs button.is-active {
+  background: #0b0b0b;
+  color: #fff;
+}
+
+.orders-filter-tabs span {
+  min-width: 0;
+  font: 800 8px/1.2 monospace;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  overflow-wrap: anywhere;
+}
+
+.orders-filter-tabs strong {
+  font: 900 14px/1 "Space Grotesk", Arial, sans-serif;
+}
+
+.orders-grid {
+  margin-top: 20px;
+  display: grid;
+  gap: 20px;
+}
+
+.order-card {
+  border: 1px solid rgba(0, 0, 0, 0.2);
+  border-radius: 18px;
+  background: #fff;
+  padding: 18px;
+  display: grid;
+  gap: 16px;
+  animation: rise 0.6s ease both;
+}
+
+.order-card header {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+}
+
+.order-card h2 {
+  margin: 0 0 6px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 14px;
+}
+
+.order-card header p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.order-status {
+  padding: 6px 10px;
+  border-radius: 999px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 10px;
+  border: 1px solid rgba(0, 0, 0, 0.2);
+}
+
+.order-status.sent {
+  background: #fef2f2;
+}
+
+.order-status.paid_reported {
+  background: #fff4d6;
+}
+
+.order-status.paid {
+  background: #e7f8ed;
+}
+
+.order-status.production {
+  background: #eef2ff;
+}
+
+.order-status.delivered {
+  background: #e7f0ff;
+}
+
+.order-body {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.order-name {
+  margin: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  font-size: 11px;
+  color: #0b0b0b;
+}
+
+.order-contact,
+.order-address {
+  margin: 0;
+}
+
+.order-fulfillment,
+.order-payment {
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-radius: 12px;
+  padding: 10px;
+  background: #fafafa;
+  display: grid;
+  gap: 4px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+}
+
+.order-payment {
+  background: #f4f1e9;
+}
+
+.order-fulfillment span,
+.order-payment span {
+  color: var(--accent);
+  font-weight: 700;
+}
+
+.order-fulfillment strong,
+.order-fulfillment p,
+.order-payment strong,
+.order-payment p {
+  margin: 0;
+}
+
+.order-fulfillment p,
+.order-payment p {
+  color: var(--muted);
+}
+
+.order-items {
+  display: grid;
+  gap: 6px;
+}
+
+.order-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 10px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.order-item strong {
+  font-weight: 600;
+}
+
+.order-summary {
+  border-top: 1px solid rgba(0, 0, 0, 0.15);
+  padding-top: 12px;
+  display: grid;
+  gap: 6px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+}
+
+.order-summary div {
+  display: flex;
+  justify-content: space-between;
+}
+
+.order-total {
+  font-weight: 700;
+}
+
+.order-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.pay-button {
+  border: 1px solid var(--line);
+  background: #0b0b0b;
+  color: #fff;
+  padding: 10px 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.ghost-button {
+  border: 1px solid var(--line);
+  background: #fff;
+  color: #0b0b0b;
+  padding: 10px 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.delete-button {
+  border: 1px solid #a00000;
+  background: #fff5f5;
+  color: #a00000;
+  padding: 10px 14px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.delete-button.is-confirming {
+  background: #a00000;
+  color: #fff;
+}
+
+.shop-footer {
+  margin-top: 48px;
+  padding-top: 24px;
+  border-top: 1px solid rgba(0, 0, 0, 0.2);
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  animation: rise 0.9s ease both;
+}
+
+.footer-links {
+  display: flex;
+  gap: 16px;
+}
+
+.footer-links a {
+  color: inherit;
+  text-decoration: none;
+}
+
+/* Operational dashboard */
+.orders-index { margin-bottom: 24px; padding: 10px 0; border-top: 1px solid var(--line); border-bottom: 1px solid rgba(0,0,0,.2); display: flex; justify-content: space-between; gap: 16px; font: 700 9px/1.2 monospace; letter-spacing: .14em; }
+.orders-head h1 { font-family: "Archivo Black","Space Grotesk",sans-serif; font-size: clamp(36px,6vw,72px); line-height: .94; }
+.orders-stats { margin-top: 28px; display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); border-top: 1px solid var(--line); border-left: 1px solid var(--line); }
+.orders-stats article { min-height: 110px; padding: 18px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); display: flex; flex-direction: column; justify-content: space-between; }
+.orders-stats span { font: 700 9px/1 monospace; letter-spacing: .14em; }
+.orders-stats strong { font-family: "Archivo Black","Space Grotesk",sans-serif; font-size: 34px; }
+.orders-toolbar { border-radius: var(--ng-radius); }
+.orders-login,
+.orders-empty,
+.order-card,
+.order-fulfillment,
+.order-payment { border-radius: var(--ng-radius); }
+.orders-login { width: min(520px,100%); margin: 40px auto 0; padding: clamp(24px,5vw,48px); }
+.orders-login input { min-height: 48px; }
+.order-card { padding: clamp(18px,3vw,30px); border-color: var(--line); }
+.order-status { border-radius: var(--ng-radius); font-family: monospace; }
+.order-item { padding: 10px 0; border-top: 1px solid rgba(0,0,0,.12); }
+.pay-button,
+.ghost-button,
+.delete-button { min-height: 44px; }
+.pay-button:hover:not(:disabled) { border-color: var(--accent); background: var(--accent); }
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 700px) {
+  .orders-page {
+    padding: 24px 16px 40px;
+  }
+  .orders-index { flex-direction: column; }
+  .orders-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .orders-toolbar {
+    grid-template-columns: 1fr;
+  }
+  .orders-filter-tabs {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .orders-filter-tabs button:first-child {
+    grid-column: 1 / -1;
+  }
+
+  .shop-header {
+    align-items: flex-start;
+  }
+
+  .shop-cta {
+    width: 100%;
+  }
+
+  .order-card header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .order-item {
+    grid-template-columns: 1fr;
+  }
+
+  .order-contact,
+  .order-address,
+  .order-payment p,
+  .order-item span,
+  .order-item strong {
+    overflow-wrap: anywhere;
+  }
+
+  .order-summary div {
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .order-actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .order-actions .pay-button,
+  .order-actions .ghost-button,
+  .order-actions .delete-button {
+    width: 100%;
+  }
+
+  .order-actions button {
+    min-height: 50px;
+    touch-action: manipulation;
+  }
+
+  .order-actions .delete-button.is-confirming {
+    min-height: 54px;
+    padding-inline: 12px;
+    font-size: 10px;
+    line-height: 1.3;
+    white-space: normal;
+  }
+
+  .orders-feedback {
+    position: sticky;
+    top: 92px;
+    z-index: 5;
+    padding: 14px;
+    background: var(--surface, #fff);
+    line-height: 1.45;
+  }
+}
+</style>

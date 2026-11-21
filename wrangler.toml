@@ -1,0 +1,32 @@
+name = "newgbonhi-api"
+main = "api/worker/index.js"
+compatibility_date = "2026-03-20"
+workers_dev = true
+triggers = { crons = ["0 */6 * * *"] }
+
+[vars]
+TOKEN_TTL_MS = "28800000"
+LAB_TO_EMAIL = "newgbonhifamily@gmail.com"
+LAB_FROM_EMAIL = "NewGbonhi Lab <lab@newgbonhi.com>"
+NEWSLETTER_FROM_EMAIL = "NewGbonhi <news@newgbonhi.com>"
+NEWSLETTER_FEED_URL = "https://newgbonhi.com/newsletter-feed.json"
+ORDER_FROM_EMAIL = "NewGbonhi Orders <orders@newgbonhi.com>"
+ORDER_TO_EMAIL = "newgbonhifamily@gmail.com"
+ORDER_DASHBOARD_URL = "https://newgbonhi.com/orders"
+BRAND_LOGO_URL = "https://newgbonhi.com/email-logo.png"
+SITE_URL = "https://newgbonhi.com"
+GENIUSPAY_BASE_URL = "https://geniuspay.ci/api/v1/merchant"
+GENIUSPAY_SUCCESS_URL = "https://newgbonhi.com/checkout?payment=success"
+GENIUSPAY_ERROR_URL = "https://newgbonhi.com/checkout?payment=failed"
+WAVE_BASE_URL = "https://api.wave.com"
+WAVE_SUCCESS_URL = "https://newgbonhi.com/checkout?payment=success"
+WAVE_ERROR_URL = "https://newgbonhi.com/checkout?payment=failed"
+WAVE_FALLBACK_LINK = "https://pay.wave.com/m/M_ci_cNiKvg4QvKE3/c/ci/"
+
+[[durable_objects.bindings]]
+name = "ORDERS_STORE"
+class_name = "OrdersStore"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["OrdersStore"]

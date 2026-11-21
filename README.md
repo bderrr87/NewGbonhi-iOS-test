@@ -1,0 +1,288 @@
+# NewGbonhi
+
+## Development
+
+Install dependencies:
+
+```bash
+npm install
+```
+
+Run the API server (terminal 1):
+
+```bash
+npm run api:dev
+```
+
+Run the Vue app (terminal 2):
+
+```bash
+npm run dev
+```
+
+By default:
+- frontend runs on Vite (`http://localhost:4000`)
+- API runs on `http://localhost:8787`
+- Vite proxies `/api` requests to the API server
+
+## Build
+
+```bash
+npm run build
+npm run preview
+npm test
+```
+
+SEO files are generated automatically during build:
+- `public/sitemap.xml`
+- `public/robots.txt`
+
+Optional: set canonical site URL before build:
+
+```bash
+# PowerShell
+$env:SITE_URL="https://dmk4real.github.io/NewGbonhi"
+npm run build
+```
+
+## Product Data
+
+Build `src/data/products.json` from an HTML export:
+
+```bash
+npm run products:build -- path/to/products.html src/data/products.json --multiplier=1000
+```
+
+## Image Optimization (WebP)
+
+```bash
+npm run images:optimize
+```
+
+## Payments (Manual)
+
+The checkout page generates a WhatsApp message with the order summary.
+Configure your contact details and Mobile Money numbers in `.env`:
+
+```env
+VITE_WHATSAPP_NUMBER=2250700000000
+VITE_CONTACT_EMAIL=hello@newgbonhi.com
+VITE_MOMO_WAVE=Wave 07 00 00 00 00
+VITE_MOMO_WAVE_LINK=https://pay.wave.com/m/M_ci_cNiKvg4QvKE3/c/ci/
+VITE_MOMO_ORANGE=Orange 07 00 00 00 00
+VITE_MOMO_MTN=MTN 05 00 00 00 00
+VITE_MOMO_MOOV=Moov 01 00 00 00 00
+VITE_MOMO_ADDITIONAL=Mobile Money 05 05 20 15 15
+VITE_MOBILE_MONEY_API_ENABLED=false
+VITE_PAYMENT_NOTE=Carte sur demande via WhatsApp.
+```
+
+Notes:
+- Use the international WhatsApp format without spaces or `+` (example: `2250700000000`).
+- The customer pays via Mobile Money and sends proof on WhatsApp.
+- Delivery fees are defined in `src/utils/checkout.ts`.
+- The frontend logs config warnings if `VITE_WHATSAPP_NUMBER` or `VITE_CONTACT_EMAIL` is missing, or if no Mobile Money number is configured.
+- Keep `VITE_MOBILE_MONEY_API_ENABLED=false` until backend provider secrets are configured. With the flag off, Wave keeps using the direct merchant link.
+
+## Orders API & Admin Access
+
+Local development API:
+- `api/server.js` (Node, file storage in `api/orders.json`)
+
+Cloud deployment API:
+- `api/worker/index.js` (Cloudflare Worker + Durable Object storage)
+
+Set an admin password in `.env` for local Node API:
+
+```env
+ADMIN_PASSWORD=change-me
+```
+
+Optional API settings for local Node API:
+
+```env
+VITE_PORT=4000
+API_PORT=8787
+ADMIN_TOKEN_TTL_MS=28800000
+VITE_API_BASE=/api
+```
+
+Security: set `ADMIN_PASSWORD` and `STUDIO_PASSWORD` only on the backend. Never use a `VITE_` variable for a secret: those values are public in the browser bundle. Admin access is unavailable without the server secret. The Studio password gate is a convenience gate; its published static assets are not confidential.
+
+## GeniusPay Mobile Payments
+
+The checkout creates a NewGbonhi order first, then requests a GeniusPay hosted
+checkout URL for the item subtotal. Delivery fees stay payable on arrival, like
+the manual Mobile Money flow.
+
+Local `.env` values for sandbox testing:
+
+```env
+GENIUSPAY_API_KEY=pk_sandbox_xxx
+GENIUSPAY_API_SECRET=sk_sandbox_xxx
+GENIUSPAY_WEBHOOK_SECRET=whsec_xxx
+GENIUSPAY_BASE_URL=https://geniuspay.ci/api/v1/merchant
+SITE_URL=http://localhost:5173
+GENIUSPAY_SUCCESS_URL=http://localhost:5173/checkout?payment=success
+GENIUSPAY_ERROR_URL=http://localhost:5173/checkout?payment=failed
+```
+
+Cloudflare Worker secrets:
+
+```sh
+npx wrangler secret put GENIUSPAY_API_KEY
+npx wrangler secret put GENIUSPAY_API_SECRET
+npx wrangler secret put GENIUSPAY_WEBHOOK_SECRET
+```
+
+Configure this webhook URL in the GeniusPay merchant dashboard:
+
+```text
+https://newgbonhi-api.dominiquekouakou2.workers.dev/api/payments/geniuspay/webhook
+```
+
+Webhook signatures are verified with `X-Webhook-Signature` and
+`X-Webhook-Timestamp`. A valid `payment.success` / `completed` event marks the
+order as `paid` automatically.
+
+## Direct Mobile Money APIs
+
+The checkout can call `/api/orders/:id/mobile-money-payment` after an order is
+created. It is disabled by default so the current manual/Wave-link flow remains
+unchanged.
+
+Wave Checkout API is implemented. If `WAVE_API_KEY` is configured, the backend
+creates a Wave checkout session and returns `wave_launch_url`; otherwise it
+falls back to `WAVE_FALLBACK_LINK`.
+
+Local `.env` values for Wave testing:
+
+```env
+WAVE_API_KEY=wave_sn_prod_xxx
+WAVE_SIGNING_SECRET=wave_sn_AKS_xxx
+WAVE_BASE_URL=https://api.wave.com
+WAVE_SUCCESS_URL=http://localhost:5173/checkout?payment=success
+WAVE_ERROR_URL=http://localhost:5173/checkout?payment=failed
+WAVE_FALLBACK_LINK=https://pay.wave.com/m/M_ci_cNiKvg4QvKE3/c/ci/
+VITE_MOBILE_MONEY_API_ENABLED=true
+```
+
+Cloudflare Worker secrets:
+
+```sh
+npx wrangler secret put WAVE_API_KEY
+npx wrangler secret put WAVE_SIGNING_SECRET
+```
+
+`WAVE_SIGNING_SECRET` is optional and only needed if request signing is enabled
+for the Wave API key. Orange Money and MTN Money API routes are scaffolded but
+need the official merchant API credentials before they can be enabled.
+
+## Orders History
+
+Visit `/orders` in the frontend.
+- admin login is verified by the backend API
+- order read/update/delete operations require an authenticated API token
+
+## Deployment
+
+### GitHub Pages (Free URL)
+
+This repository includes an automatic GitHub Pages workflow:
+- file: `.github/workflows/deploy-pages.yml`
+- trigger: push on `main`
+
+Expected public URL:
+- `https://dmk4real.github.io/NewGbonhi/`
+
+Notes:
+- Pages build uses `--base=/NewGbonhi/`
+- router uses HTML5 history mode and the workflow copies `index.html` to `404.html` as SPA fallback
+- frontend API URL is injected from repository variable `VITE_API_BASE`
+- optional repository variable `SITE_URL` is used to generate canonical `sitemap.xml` / `robots.txt`
+
+### Cloudflare API (Free URL)
+
+This repository includes a Worker deployment workflow:
+- file: `.github/workflows/deploy-worker.yml`
+- trigger: push on `main` when API files change
+
+`wrangler.toml` is already configured for:
+- Worker name: `newgbonhi-api`
+- Durable Object binding: `ORDERS_STORE`
+
+Before the first deployment, configure GitHub repository secrets:
+- `CLOUDFLARE_API_TOKEN`
+- `CLOUDFLARE_ACCOUNT_ID`
+
+Then configure the Worker admin password in Cloudflare dashboard:
+1. Cloudflare dashboard -> Workers & Pages -> `newgbonhi-api`
+2. Settings -> Variables and Secrets
+3. Add secret: `ADMIN_PASSWORD`
+
+Order email notifications use:
+- `ORDER_TO_EMAIL`: internal NewGbonhi order inbox, defaults to `newgbonhifamily@gmail.com`
+- `ORDER_FROM_EMAIL`: sender used for customer and internal order emails
+- `ORDER_DASHBOARD_URL`: admin order dashboard linked from internal notifications
+- `BRAND_LOGO_URL`: public logo used inside NewGbonhi email templates
+
+Internal order notifications only include the order ID and event type. Customer
+details remain behind the authenticated `/orders` dashboard.
+
+Email sender avatars are controlled by inbox providers, not by the email HTML.
+Use the public `BRAND_LOGO_URL` asset for Google/Outlook profile photos,
+Gravatar, Apple Branded Mail, or BIMI DNS setup.
+
+After the Worker is deployed, set GitHub repository variable:
+- `VITE_API_BASE=https://<your-workers-url>/api`
+
+Then re-run the Pages workflow to rebuild the frontend with the API URL.
+
+## Google Indexing (Free)
+
+1. Deploy latest `main` branch (GitHub Pages workflow).
+2. Confirm these URLs are live:
+   - `https://dmk4real.github.io/NewGbonhi/`
+   - `https://dmk4real.github.io/NewGbonhi/robots.txt`
+   - `https://dmk4real.github.io/NewGbonhi/sitemap.xml`
+3. Open Google Search Console and add URL prefix property:
+   - `https://dmk4real.github.io/NewGbonhi/`
+4. In Search Console, submit sitemap:
+   - `https://dmk4real.github.io/NewGbonhi/sitemap.xml`
+5. Use URL Inspection on the home page and request indexing.
+
+After submission, indexing can take from a few days to a few weeks.
+
+### Useful scripts
+
+```bash
+npm run api:dev          # Local Node API
+npm run api:worker:dev   # Local Worker dev (requires Wrangler)
+npm run api:worker:deploy
+npm test                 # Unit tests
+```
+
+
+## Audit qualité du 19 septembre 2026
+
+Voir `docs/AUDIT-20-POINTS.md` pour les résultats et limites des vérifications.
+
+- `npm run audit:site` contrôle les références internes statiques, les attributs alt et les fichiers SEO.
+- `npm run images:social` régénère la carte de partage 1200 × 630.
+- Les nouvelles routes sont `/confidentialite` et `/cgu`.
+- Pour activer Plausible, renseigner `VITE_PLAUSIBLE_SCRIPT_URL` avec l’URL HTTPS du script propre au site, fournie dans les réglages Plausible (`https://plausible.io/js/…js`), puis reconstruire le frontend. Aucun script analytics n’est chargé sans configuration et consentement. Vérifier l’arrivée des événements dans le compte après déploiement.
+- Configurer `STUDIO_PASSWORD` côté API (Node `.env` ou secret Worker). Le Studio n’a plus de mot de passe embarqué dans le JavaScript public. Son verrou d’interface ne protège pas les fichiers statiques publiés.
+- Le Worker utilise désormais exclusivement `ADMIN_PASSWORD` pour vérifier la connexion, sans empreinte de mot de passe codée en dur. Vérifier ce secret avant déploiement.
+- Ne jamais placer un secret dans `VITE_*`. La configuration Vite refuse les variables dont le nom indique un mot de passe ou une clé secrète.
+- Sur Cloudflare Pages, le middleware redirige HTTP vers HTTPS pour le domaine principal, pose les en-têtes de sécurité et renvoie 404 pour une route inconnue. Sur GitHub Pages, activer **Enforce HTTPS** dans les paramètres de l’hébergement ; le middleware Cloudflare n’y est pas exécuté.
+- Les règles anti-spam limitent les soumissions à 10 tentatives par minute, par client et groupe de route. Les compteurs en mémoire expirent et se réinitialisent au redémarrage ; ce n’est pas une protection contre une attaque distribuée.
+
+## Applications Android et iOS
+
+Le projet contient une version mobile Vue + Capacitor, avec des projets natifs Android et iOS. Voir [le guide mobile](docs/MOBILE.md) pour la configuration, les tests, la compilation et la publication.
+
+```sh
+npm run mobile:sync
+npm run mobile:android
+# Sur Mac : npm run mobile:ios
+```

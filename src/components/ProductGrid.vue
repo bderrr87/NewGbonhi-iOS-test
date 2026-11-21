@@ -1,0 +1,504 @@
+<template>
+  <p v-if="products.length === 0" class="pg-empty">{{ emptyText || $t("noProducts") }}</p>
+  <div v-else class="pg-grid" role="list">
+    <article
+      v-for="product in products"
+      :key="product.id || product.url || product.title"
+      class="pg-card"
+      role="listitem"
+    >
+      <component
+        :is="linkTag(product)"
+        class="pg-image-wrap"
+        :class="{ 'pg-image-wrap-cutout': isCutoutProduct(product) }"
+        v-bind="linkProps(product)"
+        :title="product.title || ''"
+      >
+        <template
+          v-if="
+            isDualViewProduct(product) &&
+            product.imagePrimary
+          "
+        >
+          <picture class="pg-picture">
+          <source v-if="product.imageWebp" :srcset="product.imageSrcset || product.imageWebp" sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 300px" type="image/webp" />
+          <img
+            class="pg-image pg-image-dual-front"
+            loading="lazy"
+            decoding="async"
+            :src="product.imagePrimary"
+            :alt="product.title || ''"
+          />
+          </picture>
+        </template>
+        <template v-else-if="product.imagePrimary || product.imageSecondary">
+          <picture class="pg-picture">
+            <source
+              v-if="product.imageWebp"
+              :srcset="product.imageSrcset || product.imageWebp"
+              sizes="(max-width: 700px) 50vw, (max-width: 1100px) 33vw, 300px"
+              type="image/webp"
+            />
+            <img
+              class="pg-image pg-image-primary"
+              :class="{ 'pg-image-cutout': isCutoutProduct(product) }"
+              loading="lazy"
+              decoding="async"
+              :src="product.imagePrimary || product.imageSecondary"
+              :alt="product.title || ''"
+            />
+          </picture>
+        </template>
+        <div v-else class="pg-placeholder" aria-hidden="true">
+          <span class="pg-placeholder-text">{{ $t("imageComingSoon") }}</span>
+        </div>
+        <div class="pg-badges">
+          <span v-if="!product.soldOut" class="pg-badge pg-badge-preorder">
+            {{ $t("preorderBadge") }}
+          </span>
+          <span v-if="product.soldOut" class="pg-badge pg-badge-soldout">
+            {{ $t("outOfStock") }}
+          </span>
+          <span
+            v-for="badge in getBadges(product)"
+            :key="badge"
+            class="pg-badge pg-badge-tag"
+          >
+            {{ badge }}
+          </span>
+        </div>
+        <span class="pg-view">{{ $t("view") }}</span>
+      </component>
+
+      <h3 class="pg-title">
+        <component :is="linkTag(product)" v-bind="linkProps(product)">
+          {{ product.title || "Untitled product" }}
+        </component>
+      </h3>
+
+      <RouterLink
+        v-if="product.creatorName && product.creatorSlug"
+        class="pg-creator"
+        :to="creatorLink(product)"
+      >
+        {{ $t("creatorBy") }} {{ product.creatorName }}
+      </RouterLink>
+      <p v-else-if="product.creatorName" class="pg-creator">
+        {{ $t("creatorBy") }} {{ product.creatorName }}
+      </p>
+
+      <p class="pg-price">
+        {{ formatPrice(product.price) }}
+      </p>
+
+      <button
+        class="pg-add"
+        type="button"
+        :disabled="product.soldOut"
+        @click="$emit('add-to-cart', product)"
+      >
+        {{ product.soldOut ? $t("outOfStock") : $t("addToCart") }}
+      </button>
+    </article>
+  </div>
+</template>
+
+<script>
+export default {
+  name: "ProductGrid",
+  emits: ["add-to-cart"],
+  props: {
+    products: {
+      type: Array,
+      required: true,
+    },
+    currency: {
+      type: String,
+      default: "XOF",
+    },
+    locale: {
+      type: String,
+      default: "fr-CI",
+    },
+    emptyText: {
+      type: String,
+      default: "",
+    },
+  },
+  methods: {
+    linkTag(product) {
+      const url = product?.url || "";
+      return url.startsWith("/") ? "RouterLink" : "a";
+    },
+    linkProps(product) {
+      const url = product?.url || "#";
+      return url.startsWith("/") ? { to: url } : { href: url };
+    },
+    getBadges(product) {
+      if (!product || !Array.isArray(product.tags)) {
+        return [];
+      }
+      const map = {
+        new: this.$t("filterNew"),
+        restock: this.$t("filterRestock"),
+        drop02: "Drop 02",
+        drop03: "Drop 03",
+        drop04: "Drop 04",
+      };
+      return product.tags
+        .map((tag) => map[tag] || "")
+        .filter(Boolean);
+    },
+    isCutoutProduct(product) {
+      if (product?.catalogMockup) return false;
+      const tags = Array.isArray(product?.tags) ? product.tags : [];
+      return tags.includes("cutout");
+    },
+    isDualViewProduct(product) {
+      if (product?.catalogMockup) return false;
+      const tags = Array.isArray(product?.tags) ? product.tags : [];
+      return tags.includes("dual-view");
+    },
+    formatPrice(value) {
+      if (typeof value !== "number" || Number.isNaN(value)) {
+        return "";
+      }
+      if (this.currency === "XOF") {
+        const formatted = new Intl.NumberFormat(this.locale, {
+          style: "decimal",
+          maximumFractionDigits: 0,
+        }).format(value);
+        return `${formatted} FCFA`;
+      }
+      return new Intl.NumberFormat(this.locale, {
+        style: "currency",
+        currency: this.currency,
+        maximumFractionDigits: 2,
+      }).format(value);
+    },
+    creatorLink(product) {
+      if (product?.creatorSlug === "arw-studio") {
+        return "/lab/arw-studio";
+      }
+      return `/lab#${product?.creatorSlug || ""}`;
+    },
+  },
+};
+</script>
+
+<style scoped>
+.pg-grid {
+  --pg-text: var(--text, #0b0b0b);
+  --pg-muted: var(--muted, #5f5f5f);
+  --pg-accent: var(--accent, #e10600);
+  --pg-border: var(--line, #0b0b0b);
+  --pg-card-bg: #ffffff;
+  --pg-image-bg: #ffffff;
+
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 34px 14px;
+  font-family: "Space Grotesk", "Karla", Arial, sans-serif;
+}
+
+.pg-card {
+  margin: 0;
+  min-width: 0;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  transition: transform 0.3s cubic-bezier(.2,.8,.2,1);
+}
+
+.pg-card:hover {
+  transform: translateY(-6px);
+}
+
+.pg-image-wrap {
+  position: relative;
+  display: block;
+  aspect-ratio: 3 / 4;
+  overflow: hidden;
+  background: var(--pg-image-bg);
+  border: 1px solid var(--pg-border);
+  border-radius: var(--ng-radius, 2px);
+  text-decoration: none;
+  transition: box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.pg-image-wrap::after {
+  content: "";
+  position: absolute;
+  inset: 10px;
+  border-radius: var(--ng-radius, 2px);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  pointer-events: none;
+}
+
+.pg-image-wrap:focus-visible {
+  outline: 2px solid var(--pg-accent);
+  outline-offset: 3px;
+}
+
+.pg-card:hover .pg-image-wrap {
+  box-shadow: 0 18px 38px rgba(0, 0, 0, 0.12);
+  border-color: #000;
+}
+
+.pg-card:hover .pg-image-wrap::after,
+.pg-image-wrap:focus-visible::after {
+  opacity: 1;
+}
+
+.pg-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  object-position: center;
+  display: block;
+  padding: 0;
+  box-sizing: border-box;
+  transition: opacity 0.25s ease, transform 0.35s ease;
+  background: transparent;
+}
+
+.pg-image-cutout {
+  transform: scale(1.24);
+}
+
+.pg-image-dual-front {
+  transform: scale(1.1);
+}
+
+.pg-picture {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.pg-image-wrap:hover .pg-image-primary {
+  transform: scale(1.04);
+}
+
+.pg-image-wrap:hover .pg-image-cutout {
+  transform: scale(1.3);
+}
+
+.pg-image-wrap:hover .pg-image-dual-front {
+  transform: scale(1.16);
+}
+
+.pg-placeholder {
+  width: 100%;
+  height: 100%;
+  display: grid;
+  place-items: center;
+  background: repeating-linear-gradient(
+      45deg,
+      rgba(0, 0, 0, 0.04),
+      rgba(0, 0, 0, 0.04) 10px,
+      rgba(0, 0, 0, 0.02) 10px,
+      rgba(0, 0, 0, 0.02) 20px
+    ),
+    #f7f7f7;
+}
+
+.pg-placeholder-text {
+  padding: 6px 10px;
+  border: 1px solid var(--pg-border);
+  border-radius: 999px;
+  font: 600 11px/1 "Space Grotesk", "Karla", Arial, sans-serif;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--pg-muted);
+  background: #fff;
+}
+
+.pg-badges {
+  position: absolute;
+  inset: 12px auto auto 12px;
+  max-width: calc(100% - 24px);
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  border: 1px solid rgba(11, 11, 11, .8);
+  background: rgba(247, 247, 243, .9);
+  box-shadow: 0 5px 16px rgba(0, 0, 0, .06);
+  backdrop-filter: blur(8px);
+  pointer-events: none;
+}
+
+.pg-view {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  padding: 6px 10px;
+  border-radius: var(--ng-radius, 2px);
+  border: 1px solid var(--pg-border);
+  background: #fff;
+  font: 600 10px/1 "Space Grotesk", "Karla", Arial, sans-serif;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--pg-text);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 0.2s ease, transform 0.2s ease;
+  pointer-events: none;
+}
+
+.pg-card:hover .pg-view,
+.pg-image-wrap:focus-visible .pg-view {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.pg-badge-tag {
+  background: transparent;
+  color: var(--pg-text);
+}
+
+.pg-badge-preorder {
+  background: transparent;
+  color: var(--pg-accent);
+}
+
+.pg-title {
+  margin: 14px 0 5px;
+  font: 600 14px/1.4 "Space Grotesk", "Karla", Arial, sans-serif;
+  text-align: left;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
+  color: var(--pg-text);
+}
+
+.pg-title a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.pg-title :deep(a) {
+  color: inherit;
+  text-decoration: none;
+}
+
+.pg-title a:hover,
+.pg-title a:focus-visible {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+}
+
+.pg-title :deep(a:hover),
+.pg-title :deep(a:focus-visible) {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+}
+
+.pg-price {
+  margin: 0;
+  text-align: left;
+  font: 700 13px/1.4 "Space Grotesk", "Karla", Arial, sans-serif;
+  color: var(--pg-text);
+}
+
+.pg-creator {
+  display: inline-flex;
+  width: fit-content;
+  margin: 0 0 4px;
+  text-align: left;
+  font: 700 10px/1.2 "Space Grotesk", "Karla", Arial, sans-serif;
+  color: var(--pg-accent);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.pg-creator:hover,
+.pg-creator:focus-visible {
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+}
+
+.pg-add {
+  margin-top: auto;
+  min-height: 44px;
+  width: 100%;
+  border: 1px solid var(--pg-border);
+  background: #0b0b0b;
+  color: #fff;
+  padding: 10px 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  font-size: 10px;
+  cursor: pointer;
+  transition: background-color .2s ease, border-color .2s ease, color .2s ease;
+}
+
+.pg-add:hover:not(:disabled) {
+  border-color: var(--pg-accent);
+  background: var(--pg-accent);
+}
+
+.pg-add:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.pg-sold-out {
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.pg-empty {
+  text-align: center;
+  font: 500 14px/1.4 "Space Grotesk", "Karla", Arial, sans-serif;
+  color: var(--pg-muted);
+}
+
+.pg-badge {
+  position: relative;
+  padding: 7px 9px;
+  border: 0;
+  background: transparent;
+  color: var(--pg-text);
+  font: 700 8px/1 "Space Grotesk", "Karla", Arial, sans-serif;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border-radius: 0;
+  white-space: nowrap;
+}
+
+.pg-badge + .pg-badge {
+  border-left: 1px solid rgba(11, 11, 11, .25);
+}
+
+.pg-badge-soldout {
+  background: #0b0b0b;
+  color: #fff;
+}
+
+@media (max-width: 700px) {
+  .pg-grid {
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    gap: 20px 14px;
+  }
+
+  .pg-badges {
+    inset: 8px 8px auto 8px;
+    width: auto;
+    max-width: none;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+
+  .pg-badge {
+    min-width: 0;
+    flex: 1 1 auto;
+    padding: 6px 4px;
+    text-align: center;
+    font-size: clamp(5.5px, 1.65vw, 7px);
+    letter-spacing: .04em;
+  }
+}
+</style>
